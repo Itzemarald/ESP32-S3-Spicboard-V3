@@ -9,12 +9,14 @@
 #include "esp_log.h"
 #include "7seg_spic.h"
 #include "timer_spic.h"
+#include "Spic_UART.h"
 
 Spic_LED spic_led;
 Spic_Button spic_button;
 Spic_ADC spic_adc;
 Spic_7seg spic_7seg;
 Spic_Timer spic_timer;
+Spic_UART spic_uart;
 
 volatile uint8_t system_mode = 0;
 
@@ -80,6 +82,31 @@ void sensor_display_task(void *pvParameters) {
     }
 }
 
+void switch_mode(void) {
+    if (xSemaphoreTake(hardware_mutex, portMAX_DELAY) == pdTRUE) {
+        spic_led.led_setMask(0x00);
+        system_mode = (system_mode + 1) % 3;
+
+        if (system_mode == 0) {
+            spic_timer.sb_timer_setAlarm(counter_tick_callback, 1000, 1000);
+            spic_7seg.sb_7seg_showNumber(counter_value);
+        } else {
+            spic_timer.sb_timer_cancelAlarm();
+            spic_led.led_setMask(0x00);
+        }
+        ESP_LOGI("main", "Change mode.");
+        xSemaphoreGive(hardware_mutex);
+    }
+}
+
+void on_uart_receive(const char* message) {
+    ESP_LOGI("main", "UART: %s", message);
+
+    if (strcmp(message, "UART_NEXT_MODE") == 0) {
+        switch_mode();
+    }
+}
+
 extern "C" void app_main(void) {
     ESP_LOGI("main", "Initializing...");
     if (spic_led.sb_led_init() != 0) {
@@ -130,6 +157,14 @@ extern "C" void app_main(void) {
     ESP_LOGI("main", "Buttons OK...");
 
     xTaskCreate(sensor_display_task, "sensor_display_task", 2048, NULL, 1, NULL);
+
+    if (spic_uart.sb_uart_init(115200) != 0) {
+        ESP_LOGE("main", "sb_uart_init fail");
+        return;
+    }
+    spic_uart.sb_uart_registerCallback(on_uart_receive);
+    ESP_LOGI("main", "UART OK...");
+    
     while (1) {
         ButtonRTOSEvent buttonEventFirst;
         if (xQueueReceive(buttonQueue, &buttonEventFirst, portMAX_DELAY)) {
@@ -137,23 +172,10 @@ extern "C" void app_main(void) {
             ButtonRTOSEvent buttonEventSecond;
             if (xQueueReceive(buttonQueue, &buttonEventSecond, pdMS_TO_TICKS(50))) {
                 if (buttonEventFirst.button != buttonEventSecond.button) {
-                    if (xSemaphoreTake(hardware_mutex, portMAX_DELAY) == pdTRUE) {
-                        spic_led.led_setMask(0x00);
-                        system_mode = (system_mode + 1) % 3;
-                        if (system_mode == 0) {
-                            spic_timer.sb_timer_setAlarm(counter_tick_callback, 1000, 1000);
-                            spic_7seg.sb_7seg_showNumber(counter_value);
-                        } else {
-                            spic_timer.sb_timer_cancelAlarm();
-                            spic_led.led_setMask(0x00);
-                        }
-                        ESP_LOGI("main", "Change mode.");
-                        xSemaphoreGive(hardware_mutex);
-                    }
+                    switch_mode();
                     continue;
                 }
             }
-
             
             if (system_mode == 0) {
                 if (xSemaphoreTake(hardware_mutex, portMAX_DELAY) == pdTRUE) {
