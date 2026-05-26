@@ -16,6 +16,8 @@ For more information about the hardware, visit the [SPIC Board API Reference](ht
   - `Spic_LED`: Controls for the 8 LEDs.
   - `Spic_7seg`: Multiplexing driver for the 7-segment display.
   - `Spic_Timer`: Custom wrapper class for `esp_timer` (hardware timers & blocking RTOS delays).
+- `components/ESP/` - Cross-platform communication drivers:
+  - `Spic_UART`: Asynchronous UART driver for non-blocking message.
 
 ---
 
@@ -37,6 +39,15 @@ Reads the current analog value from the potentiometer on the SPIC Board.
 ### Mode 2: Photoresistor (Light Sensor)
 Works similarly to Mode 1, but reads the analog value from the onboard light sensor (LDR).
 - Updates the 7-segment display and the LED bar graph dynamically based on ambient light intensity.
+
+---
+
+## Multi-Board Communication (UART Remote Control)
+
+This project supports a wired remote control feature using a second ESP32 microcontroller. 
+- **The Receiver (ESP 1):** The main board runs a dedicated UART task in the background. It listens for the command string `"UART_NEXT_MODE"`.
+- **The Transmitter (ESP 2):** A second, bare ESP32 uses its onboard BOOT button (GPIO 0). Pressing the button triggers a hardware interrupt (ISR), safely debounces the signal via FreeRTOS ticks, and transmits the command via UART to ESP 1 to remotely switch the operating modes.
+  *(Note: The complete source code and configuration for this transmitter device can be found in the `[branch-name]` branch of this repository).*
 
 ---
 
