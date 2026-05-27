@@ -51,7 +51,25 @@ This project supports a wired remote control feature using a second ESP32 microc
 
 ---
 
-## 🧠 Software Architecture (FreeRTOS)
+## WiFi Web Interface
+
+This project features a fully functional, interactive web interface hosted directly on the ESP32-S3. By connecting to your local home network, the ESP32 serves a digital replica (Simulator) of the SPIC Board to any smartphone or PC web browser.
+
+**Key Features of the Web Interface:**
+- **Real-Time Remote Control:** Clicking the virtual buttons on the web page triggers the exact same FreeRTOS queues on the physical board seamlessly.
+- **Sensor Override:** Adjusting the digital sliders on the web interface instantly overrides the physical analog sensors (Potentiometer and Photoresistor) on the board. 
+- **Asynchronous API:** The frontend uses a single-page architecture. It communicates with the ESP32's `esp_http_server` via background `fetch()` API calls (e.g., `/api cmd=poti&val=50`), ensuring smooth operation without page reloads.
+
+**How to use it:**
+1. Open `main.cpp` and update the WiFi credentials to match your local router:
+   `spic_web.sb_web_init("YOUR_SSID", "YOUR_PASSWORD");`
+2. Flash the firmware and monitor the serial output: `idf.py flash monitor`
+3. Wait for the successful connection message and note the assigned IP address (e.g., `http://192.168.178.45`).
+4. Enter the IP address in any web browser connected to the same network to open the SPIC Board Control Dashboard.
+
+---
+
+## Software Architecture (FreeRTOS)
 
 This project implements modern RTOS concepts to ensure maximum stability and performance:
 - **Separation of Concerns:** Hardware events (button presses) and cyclic sensor updates run in isolated, independent tasks.
@@ -61,7 +79,7 @@ This project implements modern RTOS concepts to ensure maximum stability and per
 
 ---
 
-## 🛠️ Compiling & Flashing
+## Compiling & Flashing
 
 This project requires an installed and configured **ESP-IDF** (Espressif IoT Development Framework) environment.
 

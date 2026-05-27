@@ -10,6 +10,8 @@
 #include "7seg_spic.h"
 #include "timer_spic.h"
 #include "Spic_UART.h"
+#include "Spic_Web.h"
+#include "nvs_flash.h"
 
 Spic_LED spic_led;
 Spic_Button spic_button;
@@ -17,11 +19,15 @@ Spic_ADC spic_adc;
 Spic_7seg spic_7seg;
 Spic_Timer spic_timer;
 Spic_UART spic_uart;
+Spic_Web spic_web;
 
 volatile uint8_t system_mode = 0;
 
 volatile uint8_t counter_value = 0;
 volatile bool counter_running = false;
+
+volatile bool web_override_adc = false;
+volatile uint8_t web_sensor_value = 0;
 
 static SemaphoreHandle_t hardware_mutex;
 
@@ -47,6 +53,52 @@ void counter_tick_callback(void) {
     }
 }
 
+void on_web_command(Spic_Web::WebCommand cmd, uint8_t value) {
+    if (cmd == Spic_Web::WEB_MODE) {
+        web_override_adc = false; 
+        if (xSemaphoreTake(hardware_mutex, portMAX_DELAY) == pdTRUE) {
+            system_mode = value;
+            spic_led.led_setMask(0x00);
+            if (system_mode == 0) {
+                spic_timer.sb_timer_setAlarm(counter_tick_callback, 1000, 1000);
+                spic_7seg.sb_7seg_showNumber(counter_value);
+            } else {
+                spic_timer.sb_timer_cancelAlarm();
+            }
+            ESP_LOGI("main", "Changed Mode via Web: %d", system_mode);
+            xSemaphoreGive(hardware_mutex);
+        }
+    } 
+    else if (cmd == Spic_Web::WEB_BTN0) {
+        ButtonRTOSEvent evt;
+        evt.button = Spic_Button::BUTTON0;
+        xQueueSend(buttonQueue, &evt, 0); 
+        ESP_LOGI("main", "Web-Click: Button 0");
+    } 
+    else if (cmd == Spic_Web::WEB_BTN1) {
+        ButtonRTOSEvent evt;
+        evt.button = Spic_Button::BUTTON1;
+        xQueueSend(buttonQueue, &evt, 0); 
+        ESP_LOGI("main", "Web-Click: Button 1");
+    } else if (cmd == Spic_Web::WEB_POTI && system_mode == 1) {
+        if (value == 0) {
+            web_override_adc = false;
+            return;
+        }
+        web_override_adc = true; 
+        web_sensor_value = value;
+    }
+    else if (cmd == Spic_Web::WEB_PHOTO && system_mode == 2) {
+        if (value == 0) {
+            web_override_adc = false;
+            return;
+        }
+        web_override_adc = true;
+        web_sensor_value = value;
+    }
+}
+
+
 void on_button_press(Spic_Button::BUTTON btn, Spic_Button::BUTTONEVENT event) {
     if (event != Spic_Button::ONPRESS) {
         return;
@@ -63,11 +115,18 @@ void sensor_display_task(void *pvParameters) {
     while (1) {
         uint8_t current_mode = system_mode;
         if (current_mode == 1 || current_mode == 2) {
-            int16_t adc_value = (current_mode == 1) ? spic_adc.sb_adc_read(Spic_ADC::POTI) : spic_adc.sb_adc_read(Spic_ADC::PHOTO);
+            uint8_t display_value;
+            int16_t adc_value;
             const char* sensor_name = (current_mode == 1) ? "POTI" : "PHOTO";
 
-            uint8_t display_value = (adc_value * 99) / 4095;
-
+            if (web_override_adc) {
+                display_value = web_sensor_value;
+                adc_value = (web_sensor_value * 4095) / 99;
+            } else {
+                adc_value = (current_mode == 1) ? spic_adc.sb_adc_read(Spic_ADC::POTI) : spic_adc.sb_adc_read(Spic_ADC::PHOTO);
+                display_value = (adc_value * 99) / 4095;
+            }
+            
             if (xSemaphoreTake(hardware_mutex, portMAX_DELAY) == pdTRUE) {
                 if (system_mode == current_mode) {
                     spic_7seg.sb_7seg_showNumber(display_value);
@@ -165,6 +224,20 @@ extern "C" void app_main(void) {
     spic_uart.sb_uart_registerCallback(on_uart_receive);
     ESP_LOGI("main", "UART OK...");
     
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    if (spic_web.sb_web_init("YOUR_SSID", "YOUR_PASSWORD") != 0) {
+        ESP_LOGE("main", "sb_web_init fail");
+        return;
+    }
+    spic_web.sb_web_registerCallback(on_web_command);
+    ESP_LOGI("main", "WEB OK...");
+
     while (1) {
         ButtonRTOSEvent buttonEventFirst;
         if (xQueueReceive(buttonQueue, &buttonEventFirst, portMAX_DELAY)) {
